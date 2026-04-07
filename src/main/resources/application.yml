@@ -1,0 +1,113 @@
+# ============================================================================
+# Magenc Platform - Application Configuration
+# Defaults for ALL profiles. Profile-specific overrides go in
+# application-{profile}.yml. Secrets NEVER live here.
+# ============================================================================
+
+spring:
+  application:
+    name: magenc-platform
+
+  datasource:
+    url: ${MAGENC_DB_URL:jdbc:postgresql://localhost:5432/magenc}
+    username: ${MAGENC_DB_USER:magenc}
+    password: ${MAGENC_DB_PASSWORD:magenc_local_dev}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 10000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      pool-name: magenc-hikari
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        format_sql: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/admin
+    baseline-on-migrate: true
+    schemas: [admin]
+    default-schema: admin
+
+  threads:
+    virtual:
+      enabled: true
+
+  docker:
+    compose:
+      enabled: true
+      lifecycle-management: start-and-stop
+      file: compose.yaml
+
+server:
+  port: 8080
+  forward-headers-strategy: framework
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
+  compression:
+    enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  observations:
+    key-values:
+      application: magenc-platform
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+    metrics:
+      export:
+        url: ${OTEL_METRICS_ENDPOINT:http://localhost:4318/v1/metrics}
+  tracing:
+    sampling:
+      probability: 1.0
+
+magenc:
+  tenancy:
+    root-domain: ${MAGENC_ROOT_DOMAIN:magenc.local}
+    public-paths:
+      - /actuator/health/**
+      - /actuator/info
+      - /v1/auth/**
+      - /v1/signup/**
+      - /swagger-ui/**
+      - /v3/api-docs/**
+
+  security:
+    jwt:
+      issuer: ${MAGENC_JWT_ISSUER:https://magenc.local}
+      access-token-ttl: PT15M
+      refresh-token-ttl: P30D
+
+logging:
+  level:
+    root: INFO
+    com.magenc: DEBUG
+    org.hibernate.SQL: INFO
+    org.springframework.security: INFO
+  pattern:
+    correlation: "[${spring.application.name},%X{traceId:-},%X{spanId:-}] "

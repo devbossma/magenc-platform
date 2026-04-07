@@ -1,0 +1,88 @@
+# ============================================================================
+# Magenc Platform - Local Development Stack
+# ----------------------------------------------------------------------------
+# Spring Boot's spring-boot-docker-compose dependency auto-starts this when
+# you run the app from IntelliJ. To reset everything: docker compose down -v
+# ============================================================================
+
+services:
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: magenc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: magenc
+      POSTGRES_PASSWORD: magenc_local_dev
+      POSTGRES_DB: magenc
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U magenc -d magenc"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    labels:
+      org.springframework.boot.service-connection: postgres
+
+  redis:
+    image: redis:7-alpine
+    container_name: magenc-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    labels:
+      org.springframework.boot.service-connection: redis
+
+  minio:
+    image: minio/minio:latest
+    container_name: magenc-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: magenc
+      MINIO_ROOT_PASSWORD: magenc_local_dev
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: magenc-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: magenc-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
