@@ -2,6 +2,7 @@ package com.magenc.platform.tenancy;
 
 import org.hibernate.cfg.AvailableSettings;
 import org.springframework.boot.autoconfigure.orm.jpa.HibernatePropertiesCustomizer;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
 import java.util.Map;
@@ -11,6 +12,7 @@ import java.util.Map;
  * via {@link HibernatePropertiesCustomizer}.
  */
 @Configuration
+@EnableConfigurationProperties(TenancyProperties.class)
 public class TenancyConfig implements HibernatePropertiesCustomizer {
 
     private final TenantConnectionProvider connectionProvider;

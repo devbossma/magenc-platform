@@ -61,6 +61,19 @@ public class TenantProvisioningService {
                 .migrate();
     }
 
+    public void dropSchema(String tenantSlug) {
+        if (!tenantSlug.matches("^[a-z0-9_]+$")) {
+            throw new IllegalArgumentException("Invalid tenant slug: " + tenantSlug);
+        }
+        String schemaName = TenantConnectionProvider.SCHEMA_PREFIX + tenantSlug;
+        try (java.sql.Connection conn = dataSource.getConnection();
+             var stmt = conn.createStatement()) {
+            stmt.execute("DROP SCHEMA IF EXISTS " + schemaName + " CASCADE");
+        } catch (java.sql.SQLException e) {
+            throw new TenantProvisioningException(
+                    "Failed to drop schema " + schemaName, e);
+        }
+    }
     public static class TenantProvisioningException extends RuntimeException {
         public TenantProvisioningException(String message, Throwable cause) {
             super(message, cause);

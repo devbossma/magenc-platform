@@ -7,7 +7,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.core.Authentication;
@@ -48,11 +47,9 @@ public class TenantResolutionFilter extends OncePerRequestFilter {
     private final List<String> publicPaths;
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
-    public TenantResolutionFilter(
-            @Value("${magenc.tenancy.root-domain}") String rootDomain,
-            @Value("${magenc.tenancy.public-paths}") List<String> publicPaths) {
-        this.rootDomain = rootDomain;
-        this.publicPaths = publicPaths;
+    public TenantResolutionFilter(TenancyProperties tenancyProperties) {
+        this.rootDomain = tenancyProperties.rootDomain();
+        this.publicPaths = tenancyProperties.publicPaths();
     }
 
     @Override

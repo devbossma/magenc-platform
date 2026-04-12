@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
  * metadata rather than a specific agency's data.
  */
 @Component
-public class TenantSchemaResolver implements CurrentTenantIdentifierResolver {
+public class TenantSchemaResolver implements CurrentTenantIdentifierResolver<String> {
 
     public static final String DEFAULT_TENANT = "admin";
 
