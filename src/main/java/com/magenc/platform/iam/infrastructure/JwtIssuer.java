@@ -1,11 +1,12 @@
+// Exists because this is the only class that touches the RSA private key to sign JWTs: centralizing signing prevents key leaks.
 package com.magenc.platform.iam.infrastructure;
 
 import com.magenc.platform.iam.application.TokenService;
-import com.magenc.platform.iam.domain.User;
+import com.magenc.platform.iam.domain.PlatformUser;
+import com.magenc.platform.iam.domain.SessionId;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
-import com.nimbusds.jose.JWSSigner;
 import com.nimbusds.jose.crypto.RSASSASigner;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
@@ -14,34 +15,15 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Date;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-/**
- * Issues and refreshes JWT access tokens, plus opaque refresh tokens.
- *
- * <p>Access tokens are signed with RS256 and carry the following claims:
- * <ul>
- *   <li>{@code iss} — the issuer URL ({@code https://api.orchestrate.marketing})</li>
- *   <li>{@code sub} — the user UUID</li>
- *   <li>{@code email} — the user's email</li>
- *   <li>{@code tenant} — the agency slug (e.g., "acme")</li>
- *   <li>{@code role} — the user's role (OWNER, ADMIN, MEMBER, VIEWER)</li>
- *   <li>{@code iat}, {@code exp}, {@code jti} — standard JWT timestamps + ID</li>
- * </ul>
- *
- * <p>Refresh tokens are NOT JWTs. They are 256-bit random strings stored
- * in the {@code admin.refresh_token} table with a hashed lookup key. This
- * is a deliberate design choice: refresh tokens need to be revocable
- * (logout, security incidents, password changes) and JWTs are not natively
- * revocable without a denylist that defeats their purpose.
- */
 @Component
 public class JwtIssuer implements TokenService {
-
     private static final Logger log = LoggerFactory.getLogger(JwtIssuer.class);
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
@@ -59,79 +41,58 @@ public class JwtIssuer implements TokenService {
         this.refreshTokenStore = refreshTokenStore;
     }
 
-    @Override
-    @Transactional
-    public TokenPair issueTokens(User user, String tenantSlug) {
+    @Override @Transactional
+    public TokenPair issueTokens(PlatformUser user, String tenantSlug, UUID agencyId,
+                                  UUID membershipId, String role, SessionId sessionId) {
         Instant now = Instant.now();
-        String accessToken = buildAccessToken(user, tenantSlug, now);
+        String accessToken = buildAccessToken(user, tenantSlug, agencyId, membershipId, role, sessionId, now);
         String refreshToken = generateOpaqueToken();
-        refreshTokenStore.store(
-                refreshToken,
-                user.id().value(),
-                tenantSlug,
-                now.plus(refreshTokenTtl));
+        refreshTokenStore.store(refreshToken, user.id().value(), tenantSlug, now.plus(refreshTokenTtl));
         log.debug("Issued token pair for user={} tenant={}", user.id(), tenantSlug);
         return new TokenPair(accessToken, refreshToken, accessTokenTtl);
     }
 
-    @Override
-    @Transactional
+    @Override @Transactional
     public TokenPair refresh(String refreshTokenValue) {
         RefreshTokenStore.RefreshTokenRecord record = refreshTokenStore
                 .consume(refreshTokenValue)
                 .orElseThrow(() -> new InvalidTokenException("Refresh token is invalid or expired"));
-
-        // Single-use semantics: the consume() above already deleted the old token.
-        // We now load the user and issue a fresh pair.
-        // For now we don't need a full User object, just the claims to rebuild the JWT.
         Instant now = Instant.now();
-        String accessToken = buildAccessTokenFromClaims(
-                record.userId().toString(),
-                record.tenantSlug(),
-                now);
+        // Minimal JWT for refresh: no full user reload, role not refreshed until re-login
+        JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                .issuer(keyManager.getIssuer())
+                .subject(record.userId().toString())
+                .claim("tenant", record.tenantSlug())
+                .issueTime(Date.from(now))
+                .expirationTime(Date.from(now.plus(accessTokenTtl)))
+                .jwtID(UUID.randomUUID().toString())
+                .build();
+        String accessToken = signClaims(claims);
         String newRefreshToken = generateOpaqueToken();
-        refreshTokenStore.store(
-                newRefreshToken,
-                record.userId(),
-                record.tenantSlug(),
-                now.plus(refreshTokenTtl));
+        refreshTokenStore.store(newRefreshToken, record.userId(), record.tenantSlug(), now.plus(refreshTokenTtl));
         return new TokenPair(accessToken, newRefreshToken, accessTokenTtl);
     }
 
-    @Override
-    @Transactional
+    @Override @Transactional
     public void revoke(String refreshTokenValue) {
         refreshTokenStore.revoke(refreshTokenValue);
     }
 
-    private String buildAccessToken(User user, String tenantSlug, Instant now) {
+    private String buildAccessToken(PlatformUser user, String tenantSlug, UUID agencyId,
+                                     UUID membershipId, String role, SessionId sessionId, Instant now) {
         JWTClaimsSet claims = new JWTClaimsSet.Builder()
                 .issuer(keyManager.getIssuer())
                 .subject(user.id().toString())
                 .claim("email", user.email().value())
+                .claim("display_name", user.displayName())
                 .claim("tenant", tenantSlug)
-                .claim("role", user.role().name())
+                .claim("agency_id", agencyId.toString())
+                .claim("membership_id", membershipId.toString())
+                .claim("role", role)
+                .claim("sid", sessionId.toString())
                 .issueTime(Date.from(now))
                 .expirationTime(Date.from(now.plus(accessTokenTtl)))
-                .jwtID(java.util.UUID.randomUUID().toString())
-                .build();
-        return signClaims(claims);
-    }
-
-    private String buildAccessTokenFromClaims(String subject, String tenantSlug, Instant now) {
-        // Used during refresh when we have the userId and tenant from the refresh
-        // token record but don't want to reload the full User from the database
-        // for every refresh call. Note: this means the role is NOT refreshed
-        // until the user logs out and back in. If you suspend a user, their
-        // existing tokens still work until they expire (max 15 minutes).
-        // This is the standard JWT trade-off and accepted in this design.
-        JWTClaimsSet claims = new JWTClaimsSet.Builder()
-                .issuer(keyManager.getIssuer())
-                .subject(subject)
-                .claim("tenant", tenantSlug)
-                .issueTime(Date.from(now))
-                .expirationTime(Date.from(now.plus(accessTokenTtl)))
-                .jwtID(java.util.UUID.randomUUID().toString())
+                .jwtID(sessionId.toString())
                 .build();
         return signClaims(claims);
     }
@@ -139,11 +100,9 @@ public class JwtIssuer implements TokenService {
     private String signClaims(JWTClaimsSet claims) {
         try {
             JWSHeader header = new JWSHeader.Builder(JWSAlgorithm.RS256)
-                    .keyID(keyManager.getSigningKey().getKeyID())
-                    .build();
+                    .keyID(keyManager.getSigningKey().getKeyID()).build();
             SignedJWT jwt = new SignedJWT(header, claims);
-            JWSSigner signer = new RSASSASigner(keyManager.getSigningKey());
-            jwt.sign(signer);
+            jwt.sign(new RSASSASigner(keyManager.getSigningKey()));
             return jwt.serialize();
         } catch (JOSEException e) {
             throw new IllegalStateException("Failed to sign JWT", e);

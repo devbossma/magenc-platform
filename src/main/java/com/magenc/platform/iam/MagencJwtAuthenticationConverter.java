@@ -1,3 +1,4 @@
+// Exists because Spring Security needs to extract our custom role claim from the JWT and map it to GrantedAuthority.
 package com.magenc.platform.iam;
 
 import java.util.Collection;
@@ -9,12 +10,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
-/**
- * Extracts authorities from a Magenc-issued JWT.
- * Maps the {@code role} claim to {@code ROLE_<NAME>} for {@code @PreAuthorize}.
- */
 public class MagencJwtAuthenticationConverter implements Converter<Jwt, AbstractAuthenticationToken> {
-
     @Override
     public AbstractAuthenticationToken convert(Jwt jwt) {
         Collection<GrantedAuthority> authorities = extractAuthorities(jwt);
@@ -23,9 +19,7 @@ public class MagencJwtAuthenticationConverter implements Converter<Jwt, Abstract
 
     private Collection<GrantedAuthority> extractAuthorities(Jwt jwt) {
         String role = jwt.getClaimAsString("role");
-        if (role == null || role.isBlank()) {
-            return List.of();
-        }
+        if (role == null || role.isBlank()) return List.of();
         return List.of(new SimpleGrantedAuthority("ROLE_" + role));
     }
 }
