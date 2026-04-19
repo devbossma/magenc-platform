@@ -32,6 +32,9 @@ spring:
         # Multi-tenancy uses schema resolution, not automatic validation
         hbm2ddl:
           auto: none
+        # Multi-tenancy configuration for Spring Boot 4.0+
+        multitenancy:
+          strategy: SCHEMA
 
   flyway:
     enabled: true
@@ -112,5 +115,6 @@ logging:
     com.magenc: DEBUG
     org.hibernate.SQL: INFO
     org.springframework.security: INFO
+    org.flywaydb: DEBUG
   pattern:
     correlation: "[${spring.application.name},%X{traceId:-},%X{spanId:-}] "

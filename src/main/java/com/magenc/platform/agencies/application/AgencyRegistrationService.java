@@ -1,4 +1,5 @@
 // Exists because this is the signup orchestrator: the single place where pre-flight validation, identity creation, schema provisioning, and token issuance come together.
+// TenantContext switches between admin and tenant are now explicit within this class because signup genuinely needs both contexts (admin for user/agency, tenant for schema provisioning callbacks).
 package com.magenc.platform.agencies.application;
 
 import com.magenc.platform.agencies.domain.Agency;
@@ -55,9 +56,10 @@ public class AgencyRegistrationService {
 
     public SignupResult registerNewAgency(SignupCommand command, String userAgent, String ipAddress) {
 
-        // ── STAGE 0: Pre-flight validation (no writes, no schema work) ──
-        TenantContext.set("admin");
+        // Invariant: TenantContext is already "admin" when we enter this method
+        // because TenantResolutionFilter sets it for /v1/auth/signup.
 
+        // ── STAGE 0: Pre-flight validation (no writes, no schema work) ──
         AgencySlug slug = AgencySlug.of(command.tenantSlug()); // validates format + reserved
 
         if (agencyRepository.existsBySlug(slug)) {
@@ -79,11 +81,14 @@ public class AgencyRegistrationService {
                 user.id(), agency.id(), membership.id());
 
         // ── STAGE 2: Provision tenant schema ──
+        // This genuinely requires switching between admin and tenant contexts:
+        // - provisionSchema uses admin connection to CREATE SCHEMA
+        // - then Flyway runs migrations IN the new tenant schema
+        // - then we switch back to admin to UPDATE the agency status
         try {
             provisioningService.provisionSchema(command.tenantSlug());
 
-            // Activate the agency (back in admin context)
-            TenantContext.set("admin");
+            TenantContext.set("admin"); // back to admin for the status update
             agency.activate();
             agencyRepository.save(agency);
 
@@ -91,15 +96,14 @@ public class AgencyRegistrationService {
 
         } catch (Exception e) {
             log.error("Stage 2 failed for tenant={}, rolling back", command.tenantSlug(), e);
+            TenantContext.set("admin");
             rollbackStage1(user, agency, membership, command.tenantSlug());
             authEventLogger.logFailure("SIGNUP", user.id().value(), agency.id().value(),
                     "SCHEMA_PROVISIONING_FAILED", ipAddress, userAgent);
             throw new RuntimeException("Agency registration failed during provisioning", e);
         }
 
-        // ── STAGE 3: Issue tokens ──
-        TenantContext.set("admin");
-
+        // ── STAGE 3: Issue tokens (still admin context) ──
         Session session = sessionService.createSession(
                 user.id(), agency.id().value(), membership.id(), userAgent, ipAddress);
 

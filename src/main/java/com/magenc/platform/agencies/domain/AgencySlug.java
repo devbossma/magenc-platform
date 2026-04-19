@@ -9,7 +9,8 @@ public record AgencySlug(String value) {
             "admin", "api", "www", "auth", "app", "public", "static",
             "assets", "cdn", "mail", "smtp", "ftp", "ssh", "root",
             "system", "platform", "support", "help", "status",
-            "billing", "dashboard", "login", "signup", "register"
+            "billing", "dashboard", "login", "signup", "register", "blog", "documents", "docs",
+            "mobile", "application", "authentication", "authorization"
     );
 
     public AgencySlug {

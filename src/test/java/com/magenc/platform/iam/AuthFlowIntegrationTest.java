@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
@@ -21,6 +20,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+
 
 /**
  * End-to-end integration test for the full auth flow against real Postgres.
@@ -40,7 +40,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * is exercised the same way it is in production.
  */
 @SpringBootTest
-@AutoConfigureMockMvc
 @Testcontainers
 class AuthFlowIntegrationTest {
 
@@ -48,16 +47,17 @@ class AuthFlowIntegrationTest {
     @ServiceConnection
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
 
+
+    @Autowired
+    private MockMvc mockMvc;
+
     @DynamicPropertySource
     static void setProperties(DynamicPropertyRegistry registry) {
         registry.add("magenc.security.jwt.issuer", () -> "https://api.magenc.local");
     }
 
     @Autowired
-    MockMvc mockMvc;
-
-    @Autowired
-    ObjectMapper objectMapper;
+    private ObjectMapper objectMapper;
 
     @Test
     void fullAuthFlow() throws Exception {

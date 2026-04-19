@@ -1,3 +1,4 @@
+// Exists because resolving the tenant for a request is the single most security-critical operation: this file's correctness determines data isolation.
 package com.magenc.platform.tenancy;
 
 import jakarta.servlet.FilterChain;
@@ -6,6 +7,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Pattern;
+
+import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -17,46 +22,36 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-/**
- * Resolves the current tenant for the duration of a request.
- *
- * <p>Resolution priority:
- * <ol>
- *   <li><b>JWT claim</b> (preferred). If a valid JWT is present in the
- *       SecurityContext, the {@code tenant} claim is the source of truth.
- *       This is what authenticated requests use.</li>
- *   <li><b>Host header</b> (fallback). For unauthenticated requests
- *       (signup, login, public endpoints) the tenant comes from the
- *       subdomain of the Host header. The login endpoint then validates
- *       the user against this tenant before issuing a JWT.</li>
- *   <li><b>Cross-check</b>. If both a JWT claim AND an X-Tenant-Slug
- *       header are present, they must match. A mismatch is a 403
- *       (signal of token theft or replay).</li>
- * </ol>
- *
- * <p>This filter MUST run AFTER Spring Security's JWT validation filter
- * so the SecurityContext is populated. Spring Security's filters run at
- * order ~100 by default; we run at HIGHEST_PRECEDENCE+200 to be safely
- * after them.
- */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 200)
 public class TenantResolutionFilter extends OncePerRequestFilter {
+
+    // Exists because letting controllers set TenantContext themselves leaks the concern across the codebase and risks missed cleanup.
+    // Paths listed here default to admin context when no tenant was resolvable from JWT or Host header.
+    private static final Set<String> ADMIN_CONTEXT_PATHS = Set.of(
+            "/v1/auth/signup",
+            "/v1/auth/login",
+            "/v1/auth/discover",
+            "/v1/auth/refresh"
+    );
+
+    // Exists because Host-derived tenant slugs flow into SET search_path — we MUST validate before trusting.
+    private static final Pattern VALID_SLUG = Pattern.compile("^[a-z0-9_]{3,63}$");
 
     private final String rootDomain;
     private final List<String> publicPaths;
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
-    public TenantResolutionFilter(TenancyProperties tenancyProperties) {
-        this.rootDomain = tenancyProperties.rootDomain();
-        this.publicPaths = tenancyProperties.publicPaths();
+    public TenantResolutionFilter(TenancyProperties properties) {
+        this.rootDomain = properties.rootDomain();
+        this.publicPaths = properties.publicPaths();
     }
 
     @Override
     protected void doFilterInternal(
             HttpServletRequest request,
-            HttpServletResponse response,
-            FilterChain chain) throws ServletException, IOException {
+            @NonNull HttpServletResponse response,
+            @NonNull FilterChain chain) throws ServletException, IOException {
 
         try {
             String tenantFromJwt = extractTenantFromJwt();
@@ -66,27 +61,24 @@ public class TenantResolutionFilter extends OncePerRequestFilter {
             String resolvedTenant = null;
 
             if (tenantFromJwt != null) {
-                // Authenticated request: JWT claim is authoritative
                 resolvedTenant = tenantFromJwt;
-
-                // Cross-check with X-Tenant-Slug header if present
                 if (headerTenant != null && !headerTenant.equals(tenantFromJwt)) {
-                    response.sendError(
-                            HttpServletResponse.SC_FORBIDDEN,
+                    response.sendError(HttpServletResponse.SC_FORBIDDEN,
                             "Tenant mismatch between JWT and X-Tenant-Slug header");
                     return;
                 }
             } else if (tenantFromHost != null) {
-                // Unauthenticated request: fall back to Host header
                 resolvedTenant = tenantFromHost;
+            } else if (ADMIN_CONTEXT_PATHS.contains(request.getRequestURI())) {
+                // Auth endpoints (signup, login, discover, refresh) run in admin context
+                // because they need to read admin.platform_user and admin.agency before any tenant exists.
+                resolvedTenant = "admin";
             }
 
             if (resolvedTenant != null) {
                 TenantContext.set(resolvedTenant);
             } else if (!isPublicPath(request.getRequestURI())) {
-                response.sendError(
-                        HttpServletResponse.SC_BAD_REQUEST,
-                        "Tenant could not be resolved");
+                response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Tenant could not be resolved");
                 return;
             }
 
@@ -106,25 +98,22 @@ public class TenantResolutionFilter extends OncePerRequestFilter {
     }
 
     private @Nullable String extractTenantFromHost(String host) {
-        if (host == null || host.isBlank()) {
-            return null;
-        }
-        if (!host.endsWith("." + rootDomain) && !host.equals(rootDomain)) {
-            return null;
-        }
-        if (host.equals(rootDomain)) {
-            return null;
-        }
+        if (host == null || host.isBlank()) return null;
+        if (!host.endsWith("." + rootDomain) && !host.equals(rootDomain)) return null;
+        if (host.equals(rootDomain)) return null;
         String prefix = host.substring(0, host.length() - rootDomain.length() - 1);
         int firstDot = prefix.indexOf('.');
-        return firstDot == -1 ? prefix : prefix.substring(0, firstDot);
+        String slug = firstDot == -1 ? prefix : prefix.substring(0, firstDot);
+
+        // Validate the extracted slug before returning: defense against SQL injection
+        // if the slug ever reaches SET search_path via the connection provider.
+        if (!VALID_SLUG.matcher(slug).matches()) return null;
+        return slug;
     }
 
     private boolean isPublicPath(String uri) {
         for (String pattern : publicPaths) {
-            if (pathMatcher.match(pattern, uri)) {
-                return true;
-            }
+            if (pathMatcher.match(pattern, uri)) return true;
         }
         return false;
     }

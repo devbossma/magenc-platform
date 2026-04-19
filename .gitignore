@@ -38,4 +38,5 @@ application-local.yml
 *.key
 *.p12
 *.jks
+maven.properties
 secrets/

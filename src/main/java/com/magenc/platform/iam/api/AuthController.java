@@ -1,4 +1,5 @@
 // Exists because this is the ONLY HTTP surface for authentication: login, discover, switch, refresh, logout, me.
+// Tenant context is set by TenantResolutionFilter based on the path, not by this controller.
 package com.magenc.platform.iam.api;
 
 import com.magenc.platform.iam.api.dto.DiscoveryLoginRequest;
@@ -14,7 +15,6 @@ import com.magenc.platform.iam.application.TokenService;
 import com.magenc.platform.iam.domain.Email;
 import com.magenc.platform.iam.domain.RawPassword;
 import com.magenc.platform.iam.domain.SessionId;
-import com.magenc.platform.tenancy.TenantContext;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -44,8 +44,7 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<TokenResponse> login(@Valid @RequestBody LoginRequest request,
-                                                HttpServletRequest httpRequest) {
-        TenantContext.set("admin");
+                                               HttpServletRequest httpRequest) {
         TokenService.TokenPair pair = authService.authenticateScoped(
                 request.tenantSlug(),
                 Email.of(request.email()),
@@ -59,7 +58,6 @@ public class AuthController {
     public ResponseEntity<DiscoveryLoginResponse> discover(
             @Valid @RequestBody DiscoveryLoginRequest request,
             HttpServletRequest httpRequest) {
-        TenantContext.set("admin");
         var result = authService.authenticateDiscovery(
                 Email.of(request.email()),
                 RawPassword.of(request.password()),
@@ -88,16 +86,10 @@ public class AuthController {
             @Valid @RequestBody SwitchTenantRequest request,
             @AuthenticationPrincipal Jwt jwt,
             HttpServletRequest httpRequest) {
-        TenantContext.set("admin");
+        // TODO: implement authenticateByScopedSession(jwt, targetTenant) to avoid re-asking for password
         TokenService.TokenPair pair = authService.authenticateScoped(
                 request.targetTenantSlug(),
                 Email.of(jwt.getClaimAsString("email")),
-                // For switch, we trust the existing JWT instead of re-asking password.
-                // This is a deliberate UX choice: switching workspaces shouldn't require
-                // re-entering password if you have a valid session.
-                // Security: the user already has a valid JWT, proving they authenticated.
-                // We just need to verify they have membership in the target agency.
-                // TODO: refactor authenticateScoped to accept either password or existing JWT
                 RawPassword.of("SWITCH_NOT_IMPLEMENTED_YET"),
                 httpRequest.getHeader("User-Agent"),
                 httpRequest.getRemoteAddr());
@@ -112,7 +104,7 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(@Valid @RequestBody RefreshRequest request,
-                                        @AuthenticationPrincipal Jwt jwt) {
+                                       @AuthenticationPrincipal Jwt jwt) {
         tokenService.revoke(request.refreshToken());
         if (jwt != null) {
             String sid = jwt.getClaimAsString("sid");
