@@ -21,10 +21,21 @@
         <java.version>21</java.version>
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <spring-modulith.version>1.2.1</spring-modulith.version>
-        <springdoc.version>2.6.0</springdoc.version>
+
+        <!-- Spring Modulith 2.x is the Spring Boot 4 compatible line.
+             1.x was for Boot 3 and references old autoconfigure packages. -->
+        <spring-modulith.version>2.0.5</spring-modulith.version>
+
+        <!-- springdoc 3.x targets Spring Boot 4 / Framework 7.
+             2.x was the Boot 3 line and will fail on Boot 4 autoconfigure classes. -->
+        <springdoc.version>3.0.3</springdoc.version>
+
         <bucket4j.version>8.10.1</bucket4j.version>
         <jspecify.version>1.0.0</jspecify.version>
+
+        <!-- Note: Testcontainers 2.0.4 is managed by Spring Boot 4.0.5 parent.
+             We no longer import its BOM manually. -->
+
         <!-- Loaded from maven.properties by properties-maven-plugin at runtime -->
         <NVD_API_KEY></NVD_API_KEY>
     </properties>
@@ -35,13 +46,6 @@
                 <groupId>org.springframework.modulith</groupId>
                 <artifactId>spring-modulith-bom</artifactId>
                 <version>${spring-modulith.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>org.testcontainers</groupId>
-                <artifactId>testcontainers-bom</artifactId>
-                <version>1.19.8</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -69,14 +73,17 @@
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
+
+        <!-- Flyway: Spring Boot 4 provides a dedicated starter.
+             Previously we pulled flyway-core + flyway-database-postgresql separately.
+             The starter brings both plus the right autoconfigure glue for Boot 4. -->
         <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-core</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
         </dependency>
         <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>
-            <version>10.0.1</version>
         </dependency>
 
         <!-- Security -->
@@ -157,22 +164,19 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-test-autoconfigure</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-testcontainers</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Testcontainers 2.x uses new artifact naming: testcontainers-<technology>.
+             Old artifact 'postgresql' is now 'testcontainers-postgresql'. -->
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>postgresql</artifactId>
+            <artifactId>testcontainers-postgresql</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>junit-jupiter</artifactId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -218,6 +222,7 @@
                             <files>
                                 <file>${project.basedir}/maven.properties</file>
                             </files>
+                            <quiet>true</quiet>
                         </configuration>
                     </execution>
                 </executions>
@@ -232,9 +237,11 @@
                         <suppressionFile>owasp-suppressions.xml</suppressionFile>
                     </suppressionFiles>
                     <nvdApiKey>${NVD_API_KEY}</nvdApiKey>
+                    <!-- ADD THESE TWO -->
+                    <nvdApiDelay>2000</nvdApiDelay>
+                    <nvdValidForHours>24</nvdValidForHours>
                 </configuration>
             </plugin>
-
         </plugins>
     </build>
 </project>

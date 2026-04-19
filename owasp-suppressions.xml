@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+
+    <!-- ============================================================== -->
+    <!-- CVE-2022-31691 — spring-boot-devtools FALSE POSITIVE             -->
+    <!-- ============================================================== -->
+    <!--
+        Reviewed: April 19, 2026
+        Flagged on: spring-boot-devtools-4.0.5.jar (CVSS 9.8)
+        Root CVE description (from https://spring.io/security/cve-2022-31691/):
+            "Spring Tools 4 for Eclipse version 4.16.0 and below as well as
+             VSCode extensions such as Spring Boot Tools, Concourse CI Pipeline
+             Editor, Bosh Editor and Cloudfoundry Manifest YML Support version
+             1.39.0 and below all use Snakeyaml library for YAML editing support."
+
+        Why this is a FALSE POSITIVE:
+            The actual vulnerability is in IDE plugins ("Spring Tools 4 for Eclipse"
+            and VSCode "Spring Boot Tools" extension) — NOT in the spring-boot-devtools
+            Maven artifact. OWASP dependency-check matched on the substring "tools"
+            in three CPE identifiers:
+              - cpe:2.3:a:vmware:spring_boot_tools:*     ← IDE plugin (not us)
+              - cpe:2.3:a:vmware:spring_tools:*          ← IDE plugin (not us)
+              - cpe:2.3:a:vmware:spring_boot:*           ← generic Spring Boot (too broad)
+            None of the actual Snakeyaml YAML-editing code from the IDE plugins
+            exists in the spring-boot-devtools runtime library.
+
+        Additional defense in depth:
+            spring-boot-devtools is declared with <scope>runtime</scope> and
+            <optional>true</optional> in our pom.xml, so it is NEVER included
+            in production JARs. Even if the CVE were real, it would only affect
+            developer workstations, not deployed services.
+    -->
+    <suppress>
+        <notes><![CDATA[
+            FALSE POSITIVE: CVE-2022-31691 targets Spring Tools 4 for Eclipse and
+            the VSCode "Spring Boot Tools" extension (IDE plugins), NOT the
+            spring-boot-devtools Maven artifact. OWASP dependency-check is matching
+            on the substring "tools" across unrelated CPE identifiers.
+            Additionally: our devtools dep is scope=runtime + optional=true and
+            never ships in production JARs.
+        ]]></notes>
+        <packageUrl regex="true">^pkg:maven/org\.springframework\.boot/spring-boot-devtools@.*$</packageUrl>
+        <cve>CVE-2022-31691</cve>
+    </suppress>
+
+    <!-- ============================================================== -->
+    <!-- Apache Tomcat 11.0.20 April 2026 CVE batch                       -->
+    <!-- CVE-2026-34486, CVE-2026-34487, CVE-2026-34500                   -->
+    <!-- ============================================================== -->
+    <!--
+        Reviewed: April 19, 2026
+        Flagged on: tomcat-embed-core-11.0.20.jar (CVSS 7.5 each, below our
+                    failBuildOnCVSS=8 threshold but still reported)
+
+        CVE-2026-34486: EncryptInterceptor bypass — requires Tomcat cluster
+                        configuration with EncryptInterceptor enabled. We do
+                        not use Tomcat clustering.
+
+        CVE-2026-34487: Kubernetes bearer token exposed in logs by cloud
+                        membership clustering component. Requires Tomcat
+                        cluster with KubernetesMembershipService. We use
+                        neither.
+
+        CVE-2026-34500: OCSP soft-fail under FFM OpenSSL integration with
+                        CLIENT_CERT auth. We use plain embedded Tomcat
+                        over plain HTTP without client certificates or FFM.
+
+        Fix target: Tomcat 11.0.21 (expected upstream release shortly).
+                    Will be pulled in automatically when Boot 4.0.6+ bumps
+                    managed Tomcat version. REMOVE these suppressions then.
+    -->
+    <suppress>
+        <notes><![CDATA[
+            Not exploitable in our deployment: we do not use Tomcat clustering
+            (CVE-34486, CVE-34487) nor FFM OpenSSL with CLIENT_CERT auth
+            (CVE-34500). We run plain embedded Tomcat over plain HTTP.
+            Re-review when Boot bumps Tomcat to 11.0.21+.
+        ]]></notes>
+        <packageUrl regex="true">^pkg:maven/org\.apache\.tomcat\.embed/tomcat-embed-core@.*$</packageUrl>
+        <cve>CVE-2026-34486</cve>
+        <cve>CVE-2026-34487</cve>
+        <cve>CVE-2026-34500</cve>
+    </suppress>
+
+    <!-- ============================================================== -->
+    <!-- DOMPurify 3.3.2 FORBID_TAGS bypass in swagger-ui                 -->
+    <!-- ============================================================== -->
+    <!--
+        Reviewed: April 19, 2026
+        Flagged on: swagger-ui-5.32.2.jar: swagger-ui-bundle.js
+                    swagger-ui-5.32.2.jar: swagger-ui-es-bundle.js
+                    (pkg:javascript/DOMPurify@3.3.2)
+
+        Root issue: Short-circuit evaluation bug where ADD_TAGS-as-function
+                    bypasses FORBID_TAGS. Only affects DOMPurify callers that
+                    use BOTH ADD_TAGS as a function AND FORBID_TAGS
+                    simultaneously in the same sanitizer config.
+
+        Why not applicable:
+            - swagger-ui bundles DOMPurify internally to sanitize OpenAPI
+              descriptions it renders. It does not expose the ADD_TAGS/FORBID_TAGS
+              configuration to our application code.
+            - Swagger UI is dev-only: we access it only from internal/localhost
+              and plan to disable it in production via application profile.
+            - Even if exploitable, the attack surface is limited to a user
+              with authenticated access to Swagger UI rendering an attacker-
+              controlled OpenAPI spec — a threat model that doesn't apply to
+              a single-application deployment.
+
+        Fix target: swagger-ui bundles a newer DOMPurify (3.3.3+) once
+                    upstream swagger-ui updates. Typically follows within 1-2
+                    release cycles. Will be pulled in automatically when
+                    springdoc-openapi bumps its swagger-ui version.
+                    REMOVE this suppression when that happens.
+    -->
+    <suppress>
+        <notes><![CDATA[
+            Not exploitable in our deployment: swagger-ui bundles DOMPurify
+            internally and we don't control its ADD_TAGS/FORBID_TAGS config.
+            Swagger UI is dev-only and will be disabled in production profile.
+            Re-review when springdoc-openapi bumps swagger-ui to a version
+            bundling DOMPurify 3.3.3+.
+        ]]></notes>
+        <packageUrl regex="true">^pkg:javascript/DOMPurify@.*$</packageUrl>
+        <vulnerabilityName regex="true">.*FORBID_TAGS.*</vulnerabilityName>
+    </suppress>
+
+</suppressions>
